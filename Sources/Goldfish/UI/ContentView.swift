@@ -163,16 +163,18 @@ struct ContentView: View {
                                     .font(.system(size: 16)).foregroundStyle(device.isInternal ? Color.muted.opacity(0.7) : (model.selected == device ? Color.mint : Color.muted))
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(device.name).font(.system(size: 11, weight: .semibold)).foregroundStyle(device.isInternal ? Color.muted : Color.ink).lineLimit(1)
-                                    Text(device.isInternal ? "Internal · not supported · \(device.sizeDescription)" : "\(device.sizeDescription) · \(device.identifier)")
-                                        .font(.system(size: 9)).foregroundStyle(Color.muted).lineLimit(1)
+                                     Text(deviceSubtitle(device))
+                                         .font(.system(size: 9)).foregroundStyle(Color.muted).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
                                  if device.isInternal {
                                      Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Color.muted.opacity(0.7))
                                  }
                             }
-                            .padding(.horizontal, 10).frame(height: 48)
-                            .background(model.selected == device ? Color.mint.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                             .padding(.horizontal, 10)
+                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                             .contentShape(Rectangle())
+                             .background(model.selected == device ? Color.mint.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
                         .disabled(device.isInternal)
@@ -183,7 +185,8 @@ struct ContentView: View {
                             .font(.system(size: 10)).foregroundStyle(Color.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 8)
                     }
                 }
-                .padding(.horizontal, 12)
+                 .padding(.horizontal, 12)
+                 .frame(maxWidth: .infinity)
             }
             .frame(maxHeight: 260)
 
@@ -216,25 +219,35 @@ struct ContentView: View {
                 Spacer()
                 if count > 0 { Text(count.formatted()).font(.system(size: 9, design: .monospaced)).foregroundStyle(active ? Color.mint : Color.muted) }
             }
-            .foregroundStyle(active ? Color.ink : Color.muted)
-            .padding(.horizontal, 10).frame(height: 33)
-            .background(active ? Color.raised : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-            .overlay(alignment: .leading) { if active { RoundedRectangle(cornerRadius: 2).fill(Color.mint).frame(width: 2, height: 18) } }
+             .foregroundStyle(active ? Color.ink : Color.muted)
+             .padding(.horizontal, 10)
+             .frame(maxWidth: .infinity, minHeight: 33, alignment: .leading)
+             .background(active ? Color.raised : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+             .overlay(alignment: .leading) { if active { RoundedRectangle(cornerRadius: 2).fill(Color.mint).frame(width: 2, height: 18) } }
+             .contentShape(Rectangle())
+         }
+         .buttonStyle(.plain).padding(.horizontal, 12).frame(maxWidth: .infinity)
+     }
+
+    private func deviceSubtitle(_ device: Device) -> String {
+        if device.isInternal {
+            return "Internal · not supported · \(device.sizeDescription) · \(device.filesystem)"
         }
-        .buttonStyle(.plain).padding(.horizontal, 12)
+        return "\(device.sizeDescription) · \(device.filesystem) · \(device.identifier)"
     }
 
     private var topBar: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(model.selected?.name ?? "No device selected").foregroundStyle(Color.muted)
-                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(Color.muted.opacity(0.75))
-                    Text("Read-only scan").foregroundStyle(Color.muted)
-                }
-                .font(.system(size: 10))
+                Text(showingQueue ? "RECOVERY QUEUE" : "SCAN RESULTS")
+                    .font(.system(size: 9, weight: .bold)).tracking(1).foregroundStyle(Color.muted)
                 HStack(spacing: 10) {
-                    Text(showingQueue ? "Recovery queue" : "Scan results").font(.system(size: 21, weight: .semibold)).foregroundStyle(Color.ink)
+                    Text(model.selected?.name ?? "No device selected")
+                        .font(.system(size: 21, weight: .semibold)).foregroundStyle(Color.ink).lineLimit(1)
+                    if let device = model.selected {
+                        Text("\(device.sizeDescription) · \(device.filesystem) · \(device.identifier)")
+                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(Color.muted).lineLimit(1)
+                    }
                     HStack(spacing: 6) {
                         Circle().fill(model.scanning ? Color.mint : Color.muted).frame(width: 6, height: 6)
                         Text(model.scanning ? "Scanning · \(Int(model.progress.fraction * 100))%" : model.message)
@@ -268,7 +281,7 @@ struct ContentView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Scan progress").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.ink)
-                        Text(model.scanning ? "\(ByteCountFormatter.string(fromByteCount: Int64(model.progress.bytesRead), countStyle: .file)) read of \(ByteCountFormatter.string(fromByteCount: Int64(model.progress.total), countStyle: .file))" : "Read-only scan of the selected volume")
+                        Text(model.scanning ? "\(ByteCountFormatter.string(fromByteCount: Int64(model.progress.bytesRead), countStyle: .file)) read of \(ByteCountFormatter.string(fromByteCount: Int64(model.progress.total), countStyle: .file))" : "Scan of the selected volume")
                             .font(.system(size: 9)).foregroundStyle(Color.muted)
                     }
                     Spacer()
@@ -338,7 +351,7 @@ struct ContentView: View {
             if displayedFiles.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: model.scanning ? "waveform.path" : "doc.text.magnifyingglass").font(.system(size: 23)).foregroundStyle(Color.muted)
-                    Text(model.scanning ? "Possible files will appear here as they are found." : (model.files.isEmpty ? "Select a device and start a read-only scan." : "No files match this search."))
+                    Text(model.scanning ? "Possible files will appear here as they are found." : (model.files.isEmpty ? "Select a device and start a scan." : "No files match this search."))
                         .font(.system(size: 11)).foregroundStyle(Color.muted).multilineTextAlignment(.center)
                     if model.files.isEmpty && !model.scanning {
                         Button { model.start() } label: { Label("Start safe scan", systemImage: "viewfinder") }

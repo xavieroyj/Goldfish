@@ -25,7 +25,8 @@ public struct DeviceProvider: Sendable {
                 isRemovable: isRemovable,
                 isInternal: isInternal,
                 identifier: info["ParentWholeDisk"] as? String ?? identifier,
-                size: size
+                size: size,
+                filesystem: filesystemDescription(from: info)
             ))
         }
         return devices.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -44,6 +45,19 @@ public struct DeviceProvider: Sendable {
         guard let deviceNode = info["DeviceNode"] as? String, deviceNode.hasPrefix("/dev/disk"),
               let size = (info["IOKitSize"] as? NSNumber)?.uint64Value, size > 0 else { return nil }
         return (deviceNode, size)
+    }
+
+    private func filesystemDescription(from info: [String: Any]) -> String {
+        let keys = ["FilesystemPersonality", "FileSystemPersonality", "FilesystemName", "FileSystemName", "FilesystemType", "FileSystemType"]
+        let raw = keys.lazy.compactMap { info[$0] as? String }.first ?? "Unknown"
+        switch raw.lowercased() {
+        case "exfat": return "exFAT"
+        case "fat32": return "FAT32"
+        case "msdos": return "FAT"
+        case "apfs": return "APFS"
+        case "hfs+", "hfsplus", "hfsx": return "HFS+"
+        default: return raw
+        }
     }
 
     private func diskInfo(target: String) -> [String: Any]? {

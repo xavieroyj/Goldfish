@@ -10,9 +10,10 @@ public struct Device: Identifiable, Hashable, Sendable {
     public let isInternal: Bool
     public let identifier: String
     public let size: UInt64
+    public let filesystem: String
     public var id: String { mountPath }
 
-    public init(mountPath: String, name: String, path: String, isRemovable: Bool, isInternal: Bool, identifier: String, size: UInt64) {
+    public init(mountPath: String, name: String, path: String, isRemovable: Bool, isInternal: Bool, identifier: String, size: UInt64, filesystem: String = "Unknown") {
         self.mountPath = mountPath
         self.name = name
         self.path = path
@@ -20,6 +21,7 @@ public struct Device: Identifiable, Hashable, Sendable {
         self.isInternal = isInternal
         self.identifier = identifier
         self.size = size
+        self.filesystem = filesystem
     }
 
     public var sizeDescription: String { ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file) }

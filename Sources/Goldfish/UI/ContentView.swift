@@ -60,7 +60,7 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Salvage").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.ink)
+                    Text("Goldfish").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.ink)
                     Text("SD Recovery Studio").font(.system(size: 10)).foregroundStyle(Color.muted)
                 }
             }
@@ -330,6 +330,18 @@ struct ContentView: View {
             .padding(.horizontal, 10).frame(maxWidth: .infinity).frame(height: 31)
             .background(Color.panel, in: RoundedRectangle(cornerRadius: 5))
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.border, lineWidth: 1))
+            if model.filesStillOnCardCount > 0 {
+                Button { model.showFilesStillOnCard.toggle() } label: {
+                    Label("\(model.showFilesStillOnCard ? "Hide" : "Show") \(model.filesStillOnCardCount.formatted()) still on card",
+                          systemImage: model.showFilesStillOnCard ? "eye.slash" : "eye")
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(model.showFilesStillOnCard ? Color.mint : Color.muted)
+                        .padding(.horizontal, 10).frame(height: 31)
+                        .background(Color.panel, in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Files that still have a live entry on the card don't need recovering; you can copy them in Finder.")
+            }
         }
         .padding(.horizontal, 20)
         .background(Color.surface.opacity(0.72))
@@ -417,7 +429,7 @@ struct ContentView: View {
             FilePreviewImage(file: file).frame(width: 32, height: 32).clipShape(RoundedRectangle(cornerRadius: 4)).frame(width: 40)
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(file.name).\(file.fileExtension)").font(.system(size: 10, weight: .medium)).foregroundStyle(Color.ink).lineLimit(1)
-                Text(file.recoverySource.label)
+                Text(rowSubtitle(file))
                     .font(.system(size: 8)).foregroundStyle(file.recoverySource == .filesystemContiguousEstimate ? Color.amber : Color.muted).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4)
@@ -483,6 +495,7 @@ struct ContentView: View {
                     VStack(spacing: 0) {
                         metadataRow("Type", file.fileExtension.uppercased())
                         metadataRow("Size", file.sizeDescription)
+                        metadataRow("Status", file.status.label)
                         metadataRow("Recovery source", file.recoverySource.label)
                         if file.isFragmented { metadataRow("Data regions", "\(file.physicalRanges.count) separated regions") }
                         ForEach(file.metadata.keys.sorted(), id: \.self) { key in metadataRow(key, file.metadata[key] ?? "") }
@@ -577,6 +590,11 @@ struct ContentView: View {
     private func filesForTab(_ kind: FileKind?) -> [RecoveredFile] {
         let files = kind.map { selectedKind in model.files.filter { $0.kind == selectedKind } } ?? model.files
         return files
+    }
+
+    /// Signature hits get their directory status; deleted-record sources already say "deleted".
+    private func rowSubtitle(_ file: RecoveredFile) -> String {
+        file.recoverySource == .signatureScan ? "\(file.status.label) · \(file.recoverySource.label)" : file.recoverySource.label
     }
 
     private var exportButtonTitle: String {

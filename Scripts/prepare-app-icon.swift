@@ -43,8 +43,16 @@ for index in stride(from: 0, to: arguments.count, by: 2) {
     context.addPath(roundedShape)
     context.clip()
     let artworkScale = 0.86
-    let artworkInset = tileBounds.width * (1 - artworkScale) / 2
-    context.draw(image, in: tileBounds.insetBy(dx: artworkInset, dy: artworkInset))
+    // The supplied artwork already reaches the left and bottom edges of its
+    // canvas. Keep those edges against the tile wall rather than introducing
+    // extra horizontal or bottom margins by centering the scaled artwork.
+    let artworkBounds = CGRect(
+        x: tileBounds.minX,
+        y: tileBounds.minY,
+        width: tileBounds.width * artworkScale,
+        height: tileBounds.height * artworkScale
+    )
+    context.draw(image, in: artworkBounds)
     context.restoreGState()
 
     guard let roundedImage = context.makeImage(),

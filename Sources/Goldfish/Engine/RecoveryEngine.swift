@@ -57,6 +57,9 @@ public actor RecoveryEngine {
         guard total > 0 else { throw RecoveryError.cannotRead }
         // Every recovered file reads through this descriptor after the scan.
         let sessionDevice = try RawDevice(path: device.path, total: total)
+        // Read directory metadata first so each candidate is named and given its
+        // status as soon as it is found.
+        let fileSystem = FileSystemIndex.load(from: sessionDevice)
 
         let ranges = stride(from: UInt64(0), to: total, by: Int(Self.scanRangeSize)).map {
             ScannedRange(start: $0, end: min(total, $0 + Self.scanRangeSize))
@@ -72,7 +75,7 @@ public actor RecoveryEngine {
             func startNextRange() {
                 guard let range = pending.popFirst() else { return }
                 group.addTask {
-                    try await Self.scanRange(sessionDevice: sessionDevice, range: range) { errorRange in
+                    try await Self.scanRange(sessionDevice: sessionDevice, fileSystem: fileSystem, range: range) { errorRange in
                         await progress(await reporter.addReadError(errorRange))
                     } onProgress: { offset, bytes in
                         await progress(await reporter.addBytes(bytes, at: offset))
@@ -92,12 +95,6 @@ public actor RecoveryEngine {
         try Task.checkCancellation()
 
         let signatureCandidateCount = files.count
-        let fileSystem = FileSystemIndex.load(from: sessionDevice)
-        for index in files.indices {
-            if let originalName = fileSystem.namesByOffset[files[index].offset] {
-                files[index].applyOriginalFilename(originalName)
-            }
-        }
         var fileIndexByOffset = Dictionary(uniqueKeysWithValues: files.enumerated().map { ($1.offset, $0) })
         for record in fileSystem.deletedFiles {
             if let existing = fileIndexByOffset[record.offset] {
@@ -133,6 +130,7 @@ public actor RecoveryEngine {
             offset: record.offset,
             size: record.size,
             recoverySource: record.isContiguousEstimate ? .filesystemContiguousEstimate : .deletedFileRecord,
+            status: .deleted,
             fileExtension: record.fileExtension,
             device: device,
             metadata: [:],
@@ -200,7 +198,7 @@ public actor RecoveryEngine {
         }
     }
 
-    private nonisolated static func scanRange(sessionDevice: RawDevice, range: ScannedRange, onReadError: @escaping @Sendable (ScannedRange) async -> Void, onProgress: @escaping @Sendable (UInt64, UInt64) async -> Void, onCandidate: @escaping @Sendable (RecoveredFile) async -> Void) async throws -> [RecoveredFile] {
+    private nonisolated static func scanRange(sessionDevice: RawDevice, fileSystem: FileSystemIndex, range: ScannedRange, onReadError: @escaping @Sendable (ScannedRange) async -> Void, onProgress: @escaping @Sendable (UInt64, UInt64) async -> Void, onCandidate: @escaping @Sendable (RecoveredFile) async -> Void) async throws -> [RecoveredFile] {
         // Each worker reads through its own descriptor so requests can run in parallel.
         let device = try RawDevice(path: sessionDevice.path, total: sessionDevice.total)
         let total = device.total
@@ -227,7 +225,7 @@ public actor RecoveryEngine {
                 let start = match.offset - signature.startAdjustment
                 guard seenOffsets.insert(start).inserted, !embeddedJPEGOffsets.contains(start) else { continue }
                 do {
-                    guard let file = try carve(cache: cache, sessionDevice: sessionDevice, signature: signature, offset: start, maxRead: min(signature.maxSize, total - start)) else { continue }
+                    guard let file = try carve(cache: cache, sessionDevice: sessionDevice, fileSystem: fileSystem, signature: signature, offset: start, maxRead: min(signature.maxSize, total - start)) else { continue }
                     found.append(file)
                     if let thumbnailOffset = file.embeddedThumbnailOffset { embeddedJPEGOffsets.insert(thumbnailOffset) }
                     await onCandidate(file)
@@ -313,7 +311,7 @@ public actor RecoveryEngine {
         }
     }
 
-    private nonisolated static func carve(cache: ChunkCache, sessionDevice: RawDevice, signature: Signature, offset: UInt64, maxRead: UInt64) throws -> RecoveredFile? {
+    private nonisolated static func carve(cache: ChunkCache, sessionDevice: RawDevice, fileSystem: FileSystemIndex, signature: Signature, offset: UInt64, maxRead: UInt64) throws -> RecoveredFile? {
         guard maxRead >= signature.minSize else { return nil }
         let reader = CarveReader(cache: cache, base: offset, limit: maxRead)
         guard let size = signature.format.size(reader), size >= signature.minSize, size <= maxRead else { return nil }
@@ -321,12 +319,13 @@ public actor RecoveryEngine {
         let needsHeader = signature.kind.hasPhotoMetadata || signature.format == .jpeg
         let header = needsHeader ? try cache.read(at: offset, count: Int(min(size, photoHeaderSize))) : nil
         let thumbnail = signature.format == .jpeg ? header.flatMap(FormatCarvers.exifJPEGThumbnail(in:)) : nil
-        return RecoveredFile(
+        var file = RecoveredFile(
             name: RecoveredFile.generatedName(offset: offset),
             kind: signature.kind,
             offset: offset,
             size: size,
             recoverySource: .signatureScan,
+            status: fileSystem.status(at: offset),
             fileExtension: signature.ext,
             device: sessionDevice,
             metadata: signature.kind.hasPhotoMetadata ? header.map(PhotoMetadataExtractor.extract(from:)) ?? [:] : [:],
@@ -334,5 +333,7 @@ public actor RecoveryEngine {
             embeddedThumbnailData: thumbnail?.data,
             embeddedThumbnailOffset: thumbnail.map { offset + UInt64($0.offset) }
         )
+        if let originalName = fileSystem.namesByOffset[offset] { file.applyOriginalFilename(originalName) }
+        return file
     }
 }

@@ -15,6 +15,11 @@ private actor CandidateRecorder {
     func record(_ file: RecoveredFile) { offsets.append(file.offset) }
 }
 
+private func testDevice(_ file: URL, name: String) throws -> Device {
+    let size = try FileManager.default.attributesOfItem(atPath: file.path)[.size] as! UInt64
+    return Device(mountPath: file.path, name: name, path: file.path, isRemovable: true, isInternal: false, identifier: "test", size: size)
+}
+
 @Test func scanProgressSeparatesCandidatesReadErrorsAndUnscannedRanges() {
     let progress = ScanProgress(
         bytesRead: 40,
@@ -40,12 +45,12 @@ private actor CandidateRecorder {
     try jpeg.write(to: file)
     defer { try? FileManager.default.removeItem(at: file) }
     let recorder = ProgressRecorder()
-    let result = try await RecoveryEngine().scan(device: Device(id: file.path, name: "Test", path: file.path, isRemovable: true, isReadOnly: true)) { progress in
+    let result = try await RecoveryEngine().scan(device: try testDevice(file, name: "Test")) { progress in
         await recorder.record(progress)
     }
     #expect(result.count == 1)
     #expect(result.first?.kind == .image)
-    #expect(result.first?.data == jpeg)
+    #expect(try result.first?.readData() == jpeg)
     let latest = await recorder.latest
     #expect(latest?.scannedRanges == [ScannedRange(start: 0, end: UInt64(jpeg.count))])
     #expect(latest?.candidateRanges == [ScannedRange(start: 0, end: UInt64(jpeg.count))])
@@ -86,7 +91,7 @@ private actor CandidateRecorder {
     try volume.write(to: file)
     defer { try? FileManager.default.removeItem(at: file) }
 
-    let names = FileSystemNameIndex.namesByOffset(path: file.path, total: UInt64(volume.count))
+    let names = FileSystemIndex.load(from: try RawDevice(path: file.path, total: UInt64(volume.count))).namesByOffset
     #expect(names[1536] == "PIC0001.JPG")
 }
 
@@ -122,11 +127,11 @@ private actor CandidateRecorder {
     defer { try? FileManager.default.removeItem(at: file) }
 
     let result = try await RecoveryEngine().scan(
-        device: Device(id: file.path, name: "FAT32 test", path: file.path, isRemovable: true, isReadOnly: true),
+        device: try testDevice(file, name: "FAT32 test"),
         progress: { _ in }
     )
     #expect(result.count == 1)
-    #expect(result[0].data == original)
+    #expect(try result[0].readData() == original)
     #expect(result[0].fileExtension == "txt")
     #expect(result[0].recoverySource == .filesystemContiguousEstimate)
 }
@@ -169,13 +174,13 @@ private actor CandidateRecorder {
     defer { try? FileManager.default.removeItem(at: file) }
 
     let result = try await RecoveryEngine().scan(
-        device: Device(id: file.path, name: "exFAT test", path: file.path, isRemovable: true, isReadOnly: true),
+        device: try testDevice(file, name: "exFAT test"),
         progress: { _ in }
     )
     #expect(result.count == 1)
     #expect(result[0].name == "PIC0001")
     #expect(result[0].fileExtension == "txt")
-    #expect(result[0].data == original)
+    #expect(try result[0].readData() == original)
     #expect(result[0].recoverySource == .deletedFileRecord)
 }
 
@@ -215,12 +220,12 @@ private actor CandidateRecorder {
 
     let recorder = ProgressRecorder()
     let result = try await RecoveryEngine().scan(
-        device: Device(id: file.path, name: "FAT32 fragmented test", path: file.path, isRemovable: true, isReadOnly: true),
+        device: try testDevice(file, name: "FAT32 fragmented test"),
         progress: { await recorder.record($0) }
     )
     #expect(result.count == 1)
     #expect(result[0].size == UInt64(original.count))
-    #expect(result[0].data == original)
+    #expect(try result[0].readData() == original)
     #expect(result[0].isFragmented == true)
     #expect(result[0].physicalRanges == [ScannedRange(start: 1536, end: 2048), ScannedRange(start: 2560, end: 2566)])
     #expect(result[0].recoverySource == .deletedFileRecord)
@@ -265,10 +270,10 @@ private actor CandidateRecorder {
     try jpeg.write(to: file)
     defer { try? FileManager.default.removeItem(at: file) }
 
-    let result = try await RecoveryEngine().scan(device: Device(id: file.path, name: "Test", path: file.path, isRemovable: true, isReadOnly: true)) { _ in }
+    let result = try await RecoveryEngine().scan(device: try testDevice(file, name: "Test")) { _ in }
     #expect(result.count == 1)
     #expect(result.first?.size == UInt64(jpeg.count))
-    #expect(result.first?.data == jpeg)
+    #expect(try result.first?.readData() == jpeg)
 }
 
 @Test func exifThumbnailIsAttachedToParentInsteadOfRecoveredSeparately() async throws {
@@ -293,9 +298,9 @@ private actor CandidateRecorder {
     try jpeg.write(to: file)
     defer { try? FileManager.default.removeItem(at: file) }
 
-    let result = try await RecoveryEngine().scan(device: Device(id: file.path, name: "Test", path: file.path, isRemovable: true, isReadOnly: true)) { _ in }
+    let result = try await RecoveryEngine().scan(device: try testDevice(file, name: "Test")) { _ in }
     #expect(result.count == 1)
-    #expect(result.first?.data == jpeg)
+    #expect(try result.first?.readData() == jpeg)
     #expect(result.first?.embeddedThumbnailData == thumbnail)
 }
 
@@ -317,7 +322,7 @@ private actor CandidateRecorder {
 
     let candidates = CandidateRecorder()
     let result = try await RecoveryEngine().scan(
-        device: Device(id: file.path, name: "Boundary", path: file.path, isRemovable: true, isReadOnly: true),
+        device: try testDevice(file, name: "Boundary"),
         progress: { _ in },
         onCandidate: { await candidates.record($0) }
     )
@@ -366,13 +371,99 @@ private actor CandidateRecorder {
     let file = FileManager.default.temporaryDirectory.appendingPathComponent("format-carver-test-\(UUID().uuidString)")
     try volume.write(to: file)
     defer { try? FileManager.default.removeItem(at: file) }
-    let result = try await RecoveryEngine().scan(device: Device(id: file.path, name: "Formats", path: file.path, isRemovable: true, isReadOnly: true)) { _ in }
+    let result = try await RecoveryEngine().scan(device: try testDevice(file, name: "Formats")) { _ in }
 
     #expect(result.count == expected.count)
     for item in expected {
         let recovered = result.first { $0.offset == item.offset }
         #expect(recovered?.fileExtension == item.ext)
         #expect(recovered?.size == UInt64(item.data.count))
-        #expect(recovered?.data == item.data)
+        #expect(try recovered?.readData() == item.data)
     }
+}
+
+@Test func deletedAppleDoubleSidecarsAreNotRecovered() async throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("fat32-appledouble-test-\(UUID().uuidString)")
+    var volume = Data(repeating: 0, count: 3072)
+    func put16(_ value: UInt16, at offset: Int) {
+        volume[offset] = UInt8(value & 0xFF)
+        volume[offset + 1] = UInt8(value >> 8)
+    }
+    func put32(_ value: UInt32, at offset: Int) {
+        for byte in 0..<4 { volume[offset + byte] = UInt8((value >> (byte * 8)) & 0xFF) }
+    }
+    func putDeletedEntry(at entry: Int, shortName: String, cluster: UInt16, size: Int) {
+        volume[entry] = 0xE5
+        for (index, byte) in Array(shortName.utf8).enumerated().dropFirst() { volume[entry + index] = byte }
+        volume[entry + 11] = 0x20
+        put16(cluster, at: entry + 26)
+        put32(UInt32(size), at: entry + 28)
+    }
+    put16(512, at: 11)
+    volume[13] = 1
+    put16(1, at: 14)
+    volume[16] = 1
+    put32(1, at: 36)
+    put32(2, at: 44)
+    volume[510] = 0x55
+    volume[511] = 0xAA
+    put32(0x0FFFFFFF, at: 512 + 2 * 4)
+    // A deleted "._PHOTO.TXT" sidecar at cluster 3 and a deleted "PHOTO.TXT" at cluster 4.
+    let sidecar = Data([0x00, 0x05, 0x16, 0x07, 0x00, 0x02, 0x00, 0x00]) + Data("Mac OS X        ".utf8) + Data(repeating: 0, count: 40)
+    let original = Data(repeating: 0x4B, count: 300)
+    putDeletedEntry(at: 1024, shortName: "_PHOTO~1TXT", cluster: 3, size: sidecar.count)
+    putDeletedEntry(at: 1056, shortName: "_HOTO   TXT", cluster: 4, size: original.count)
+    volume.replaceSubrange(1536..<(1536 + sidecar.count), with: sidecar)
+    volume.replaceSubrange(2048..<(2048 + original.count), with: original)
+    try volume.write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+
+    let result = try await RecoveryEngine().scan(device: try testDevice(file, name: "AppleDouble test"), progress: { _ in })
+    #expect(result.map(\.offset) == [2048])
+    #expect(try result.first?.readData() == original)
+}
+
+@Test func signatureHitsCarryTheirDirectoryStatus() async throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("fat32-status-test-\(UUID().uuidString)")
+    var volume = Data(repeating: 0, count: 3584)
+    func put16(_ value: UInt16, at offset: Int) {
+        volume[offset] = UInt8(value & 0xFF)
+        volume[offset + 1] = UInt8(value >> 8)
+    }
+    func put32(_ value: UInt32, at offset: Int) {
+        for byte in 0..<4 { volume[offset + byte] = UInt8((value >> (byte * 8)) & 0xFF) }
+    }
+    func putEntry(at entry: Int, shortName: String, deleted: Bool, cluster: UInt16, size: Int) {
+        for (index, byte) in Array(shortName.utf8).enumerated() { volume[entry + index] = byte }
+        if deleted { volume[entry] = 0xE5 }
+        volume[entry + 11] = 0x20
+        put16(cluster, at: entry + 26)
+        put32(UInt32(size), at: entry + 28)
+    }
+    put16(512, at: 11)
+    volume[13] = 1
+    put16(1, at: 14)
+    volume[16] = 1
+    put32(1, at: 36)
+    put32(2, at: 44)
+    volume[510] = 0x55
+    volume[511] = 0xAA
+    put32(0x0FFFFFFF, at: 512 + 2 * 4)
+    put32(0x0FFFFFFF, at: 512 + 3 * 4)
+    let sof = Data([0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00])
+    let sos = Data([0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00])
+    let jpeg = Data([0xFF, 0xD8]) + sof + sos + Data(repeating: 0x20, count: 220) + Data([0xFF, 0xD9])
+    // Cluster 3: a live photo. Cluster 5: a deleted photo. Cluster 6: a photo no entry points to.
+    // A deleted entry also points at cluster 3, whose space the live photo has since reused.
+    putEntry(at: 1024, shortName: "PIC0001 JPG", deleted: false, cluster: 3, size: jpeg.count)
+    putEntry(at: 1056, shortName: "PIC0002 JPG", deleted: true, cluster: 5, size: jpeg.count)
+    putEntry(at: 1088, shortName: "OLD     TXT", deleted: true, cluster: 3, size: jpeg.count)
+    for offset in [1536, 2560, 3072] { volume.replaceSubrange(offset..<(offset + jpeg.count), with: jpeg) }
+    try volume.write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+
+    let result = try await RecoveryEngine().scan(device: try testDevice(file, name: "Status test"), progress: { _ in })
+    #expect(result.map(\.offset) == [1536, 2560, 3072])
+    #expect(result.map(\.status) == [.stillOnCard, .deleted, .noRecord])
+    #expect(result.first?.name == "PIC0001")
 }

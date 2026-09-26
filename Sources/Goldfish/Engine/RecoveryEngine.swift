@@ -209,7 +209,7 @@ public actor RecoveryEngine {
         if lookbehindStart < range.start {
             do {
                 overlap = try device.read(at: lookbehindStart, count: Int(range.start - lookbehindStart))
-            } catch {
+            } catch let error as RecoveryError where error.isMediaError {
                 await onReadError(ScannedRange(start: lookbehindStart, end: range.start))
                 GoldfishLog.write("Range lookbehind read failed at offset \(lookbehindStart): \(error.localizedDescription)")
             }
@@ -255,7 +255,7 @@ public actor RecoveryEngine {
             let block: Data
             do {
                 block = try cache.read(at: offset, count: requested)
-            } catch {
+            } catch let error as RecoveryError where error.isMediaError {
                 GoldfishLog.write("Range read failed at offset \(offset); retrying in smaller blocks: \(error.localizedDescription)")
                 let blockEnd = offset + UInt64(requested)
                 overlap.removeAll(keepingCapacity: true)
@@ -284,7 +284,8 @@ public actor RecoveryEngine {
     /// Re-reads a failed block in 64 KiB pieces, halving any piece that still
     /// fails down to a single sector, so only unreadable sectors are skipped.
     private nonisolated static func rescanInSmallBlocks(device: RawDevice, from start: UInt64, to end: UInt64, onReadError: (ScannedRange) async -> Void, onBlock: (Data, UInt64) async -> Void) async throws {
-        let sectorSize = Int(RawDevice.sectorSize)
+        // Split no finer than one device block, and never below 512 bytes.
+        let sectorSize = Int(max(512, device.blockSize))
         var retryOffset = start
         while retryOffset < end {
             try Task.checkCancellation()
@@ -296,7 +297,7 @@ public actor RecoveryEngine {
                     let part = try device.read(at: partOffset, count: partCount)
                     guard !part.isEmpty else { throw RecoveryError.incompleteRead(device.path, offset: partOffset) }
                     await onBlock(part, partOffset)
-                } catch {
+                } catch let error as RecoveryError where error.isMediaError {
                     let split = max(sectorSize, partCount / 2 / sectorSize * sectorSize)
                     if partCount > sectorSize, split < partCount {
                         pending.append((partOffset + UInt64(split), partCount - split))

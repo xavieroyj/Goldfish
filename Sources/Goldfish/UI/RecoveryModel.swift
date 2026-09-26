@@ -196,7 +196,7 @@ import AppKit
     /// Reads the first sector of the device, returning the number of bytes read.
     private static func readDeviceHeader(of device: Device) -> Result<Int, Error> {
         Result {
-            let header = try RawDevice(path: device.path, total: device.size).read(at: 0, count: Int(RawDevice.sectorSize))
+            let header = try RawDevice(path: device.path, total: device.size).read(at: 0, count: 512)
             guard !header.isEmpty else { throw RecoveryError.incompleteRead(device.path, offset: 0) }
             return header.count
         }

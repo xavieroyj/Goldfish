@@ -93,4 +93,16 @@ public enum RecoveryError: LocalizedError {
         case .deviceDisconnected(let path): "The card at \(path) is no longer connected. Reconnect it and scan again to export these files."
         }
     }
+
+    /// Whether the storage failed to return some sectors, which a scan can skip
+    /// and carry on past. Errors that mean every read will fail (a bad request,
+    /// a refused permission, a missing device) are not media errors. Unknown
+    /// codes count as media errors so a failing card is never abandoned.
+    var isMediaError: Bool {
+        switch self {
+        case .readFailed(_, let code): ![EINVAL, EACCES, EPERM, EBADF, ENXIO, ENODEV, ENOTSUP].contains(code)
+        case .incompleteRead: true
+        case .cannotRead, .rawAccessRequired, .deviceDisconnected: false
+        }
+    }
 }

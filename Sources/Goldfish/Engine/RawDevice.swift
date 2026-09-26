@@ -2,15 +2,19 @@ import Foundation
 import Darwin
 
 /// Read-only access to a device node or disk image. Raw disk devices only
-/// accept sector-aligned I/O, so reads on them are widened to whole sectors.
+/// accept I/O aligned to their block size, so reads on them are widened to
+/// whole blocks.
 final class RawDevice: @unchecked Sendable {
-    static let sectorSize: UInt64 = 512
     private static let copyChunkSize: UInt64 = 4 * 1024 * 1024
+    /// DKIOCGETBLOCKSIZE from <sys/disk.h>, which Swift does not import.
+    private static let getBlockSizeRequest: UInt = 0x4004_6418
 
     let path: String
     let total: UInt64
+    /// The device's block size: 512 on most SD cards, 4096 on some readers
+    /// and APFS containers, and 1 for regular files, which need no alignment.
+    let blockSize: UInt64
     private let descriptor: Int32
-    private let requiresSectorAlignment: Bool
 
     init(path: String, total: UInt64) throws {
         let descriptor = open(path, O_RDONLY)
@@ -21,11 +25,19 @@ final class RawDevice: @unchecked Sendable {
             close(descriptor)
             throw RecoveryError.readFailed(path, code)
         }
+        var blockSize: UInt32 = 1
         let fileType = info.st_mode & S_IFMT
+        if fileType == S_IFCHR || fileType == S_IFBLK {
+            guard ioctl(descriptor, Self.getBlockSizeRequest, &blockSize) == 0, blockSize > 0 else {
+                let code = errno
+                close(descriptor)
+                throw RecoveryError.readFailed(path, code)
+            }
+        }
         self.path = path
         self.total = total
+        self.blockSize = UInt64(blockSize)
         self.descriptor = descriptor
-        self.requiresSectorAlignment = fileType == S_IFCHR || fileType == S_IFBLK
     }
 
     deinit { close(descriptor) }
@@ -36,11 +48,11 @@ final class RawDevice: @unchecked Sendable {
         precondition(count >= 0, "Negative read count")
         guard count > 0, offset < total else { return Data() }
         let wanted = min(UInt64(count), total - offset)
-        guard requiresSectorAlignment else { return try readBytes(at: offset, count: Int(wanted)) }
+        guard blockSize > 1 else { return try readBytes(at: offset, count: Int(wanted)) }
 
-        let prefix = offset % Self.sectorSize
+        let prefix = offset % blockSize
         let alignedOffset = offset - prefix
-        let alignedEnd = (offset + wanted + Self.sectorSize - 1) / Self.sectorSize * Self.sectorSize
+        let alignedEnd = (offset + wanted + blockSize - 1) / blockSize * blockSize
         let buffer = try readBytes(at: alignedOffset, count: Int(alignedEnd - alignedOffset))
         let lower = min(Int(prefix), buffer.count)
         let upper = min(buffer.count, lower + Int(wanted))

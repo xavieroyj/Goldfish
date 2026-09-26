@@ -8,13 +8,19 @@ struct ContentView: View {
     @State private var showingQueue = false
     @State private var sortColumn: SortColumn = .offset
     @State private var sortAscending = true
+    @State private var sidebarWidth: CGFloat = 248
+    @State private var sidebarDragStartWidth: CGFloat?
+    @State private var isHoveringSidebarResizeHandle = false
+    @State private var isDraggingSidebar = false
     private let paneHeaderHeight: CGFloat = 43
+    private let sidebarMinimumWidth: CGFloat = 200
+    private let sidebarMaximumWidth: CGFloat = 320
 
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                sidebar.frame(width: 248)
-                Rectangle().fill(Color.border).frame(width: 1)
+                sidebar.frame(width: sidebarWidth)
+                sidebarResizeHandle
                 VStack(spacing: 0) {
                     topBar.frame(height: 85)
                     scanOverview.frame(height: 199)
@@ -45,6 +51,69 @@ struct ContentView: View {
             Button("OK", role: .cancel) { model.exportDestinationError = nil }
         } message: {
             Text(model.exportDestinationError ?? "")
+        }
+    }
+
+    private var sidebarResizeHandle: some View {
+        ZStack {
+            Rectangle().fill(Color.border).frame(width: 1)
+            VStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Circle()
+                        .fill(isHoveringSidebarResizeHandle || isDraggingSidebar ? Color.mint : Color.muted)
+                        .frame(width: 3, height: 3)
+                }
+            }
+            .frame(width: 9, height: 26)
+            .background(Color.surface, in: Capsule())
+            .overlay(Capsule().stroke(Color.border, lineWidth: 1))
+        }
+        .frame(width: 9)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { value in
+                    isDraggingSidebar = true
+                    if sidebarDragStartWidth == nil {
+                        sidebarDragStartWidth = sidebarWidth
+                    }
+                    guard let startWidth = sidebarDragStartWidth else { return }
+                    let boundedWidth = min(
+                        max(startWidth + value.translation.width, sidebarMinimumWidth),
+                        sidebarMaximumWidth
+                    )
+                    let scale = NSScreen.main?.backingScaleFactor ?? 1
+                    let pixelAlignedWidth = (boundedWidth * scale).rounded() / scale
+                    guard pixelAlignedWidth != sidebarWidth else { return }
+                    var transaction = Transaction()
+                    transaction.animation = nil
+                    withTransaction(transaction) {
+                        sidebarWidth = pixelAlignedWidth
+                    }
+                }
+                .onEnded { _ in
+                    sidebarDragStartWidth = nil
+                    isDraggingSidebar = false
+                }
+        )
+        .onHover { isHovering in
+            isHoveringSidebarResizeHandle = isHovering
+            if isHovering { NSCursor.resizeLeftRight.set() }
+            else { NSCursor.arrow.set() }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Resize sidebar")
+        .accessibilityValue("\(Int(sidebarWidth)) points")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                sidebarWidth = min(sidebarWidth + 12, sidebarMaximumWidth)
+            case .decrement:
+                sidebarWidth = max(sidebarWidth - 12, sidebarMinimumWidth)
+            @unknown default:
+                break
+            }
         }
     }
 

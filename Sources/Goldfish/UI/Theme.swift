@@ -3,7 +3,6 @@ import SwiftUI
 extension Color {
     static let ink = Color(hex: 0xE7EFEE)
     static let muted = Color(hex: 0x89999A)
-    static let lilac = Color(hex: 0x8C9DFF)
     static let mint = Color(hex: 0x62D7B1)
     static let coral = Color(hex: 0xF07D83)
     static let canvas = Color(hex: 0x0B1114)

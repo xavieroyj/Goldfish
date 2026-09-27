@@ -99,11 +99,12 @@ struct FileSystemIndex: Sendable {
         let name: String
         let fileExtension: String
         switch entry.name {
-        case .full(let original) where original.isEmpty:
-            name = generatedName
-            fileExtension = ""
         case .full(let original):
-            let safeName = URL(fileURLWithPath: original).lastPathComponent
+            guard let safeName = RecoveredFile.safeFilename(original) else {
+                name = generatedName
+                fileExtension = ""
+                break
+            }
             fileExtension = (safeName as NSString).pathExtension.lowercased()
             let stem = (safeName as NSString).deletingPathExtension
             name = stem.isEmpty ? generatedName : stem

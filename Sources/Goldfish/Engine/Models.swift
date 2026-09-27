@@ -7,6 +7,7 @@ public struct Device: Identifiable, Hashable, Sendable {
     /// The raw device node that is scanned, e.g. `/dev/rdisk4s1`.
     public let path: String
     public let isRemovable: Bool
+    /// A fixed internal disk. Removable media in a built-in reader is not internal.
     public let isInternal: Bool
     public let identifier: String
     public let size: UInt64

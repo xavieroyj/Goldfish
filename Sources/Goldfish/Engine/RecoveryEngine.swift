@@ -72,8 +72,11 @@ public actor RecoveryEngine {
         var offsets = Set<UInt64>()
         try await withThrowingTaskGroup(of: [RecoveredFile].self) { group in
             var pending = ranges[...]
+            var running = 0
+            var careful = false
             func startNextRange() {
                 guard let range = pending.popFirst() else { return }
+                running += 1
                 group.addTask {
                     try await Self.scanRange(sessionDevice: sessionDevice, fileSystem: fileSystem, range: range) { errorRange in
                         await progress(await reporter.addReadError(errorRange))
@@ -88,8 +91,16 @@ public actor RecoveryEngine {
             }
             for _ in 0..<workerLimit { startNextRange() }
             while let rangeFiles = try await group.next() {
+                running -= 1
                 for file in rangeFiles where offsets.insert(file.offset).inserted { files.append(file) }
-                startNextRange()
+                if !careful, workerLimit > 1, await reporter.hasReadErrors {
+                    careful = true
+                    GoldfishLog.write("Read errors detected; finishing \(running) running range(s), then scanning the rest one range at a time")
+                }
+                // Once the card reports read errors, only one range reads at a
+                // time, in order, so a failing card is not hit by several
+                // workers' retries at once.
+                if !careful || running == 0 { startNextRange() }
             }
         }
         try Task.checkCancellation()

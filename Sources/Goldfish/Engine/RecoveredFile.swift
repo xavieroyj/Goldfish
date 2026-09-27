@@ -77,9 +77,16 @@ public struct RecoveredFile: Identifiable, Hashable, Sendable {
         try device.copy(physicalRanges, size: size, to: destination)
     }
 
+    /// The last path component of a filename read from the card, or nil when
+    /// nothing usable is left. The name is never resolved against the current
+    /// directory, so "." or ".." cannot pick up a name from this Mac.
+    static func safeFilename(_ filename: String) -> String? {
+        let name = (filename as NSString).lastPathComponent
+        return name.isEmpty || name == "." || name == ".." || name == "/" ? nil : name
+    }
+
     mutating func applyOriginalFilename(_ filename: String) {
-        let safeName = URL(fileURLWithPath: filename).lastPathComponent
-        guard !safeName.isEmpty, safeName != ".", safeName != ".." else { return }
+        guard let safeName = Self.safeFilename(filename) else { return }
         let originalExtension = (safeName as NSString).pathExtension
         name = (safeName as NSString).deletingPathExtension
         if !originalExtension.isEmpty { fileExtension = originalExtension.lowercased() }

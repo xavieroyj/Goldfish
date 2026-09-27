@@ -42,7 +42,10 @@ import AppKit
     private var pendingProgress: ScanProgress?
     private var progressFlushTask: Task<Void, Never>?
 
-    init() { refresh() }
+    /// Tests pass false so the model never looks at, or selects, real devices.
+    init(refreshDevices: Bool = true) {
+        if refreshDevices { refresh() }
+    }
 
     func refresh() {
         let selectedID = selected?.id
@@ -52,11 +55,17 @@ import AppKit
             let updated = await Task.detached(priority: .userInitiated) { DeviceProvider().devices() }.value
             guard !Task.isCancelled, let self else { return }
             devices = updated
-            selected = selectedID.flatMap { id in updated.first { $0.id == id && !$0.isInternal } }
-                ?? updated.first(where: { $0.isRemovable && !$0.isInternal })
-                ?? updated.first(where: { !$0.isInternal })
+            selected = Self.preferredDevice(in: updated, previouslySelectedID: selectedID)
             isRefreshingDevices = false
         }
+    }
+
+    /// Keeps the previous selection if it is still scannable, otherwise picks a
+    /// removable card, then any other non-internal volume.
+    nonisolated static func preferredDevice(in devices: [Device], previouslySelectedID: String?) -> Device? {
+        previouslySelectedID.flatMap { id in devices.first { $0.id == id && !$0.isInternal } }
+            ?? devices.first(where: { $0.isRemovable && !$0.isInternal })
+            ?? devices.first(where: { !$0.isInternal })
     }
 
     func start() {
@@ -92,7 +101,7 @@ import AppKit
         message = "Scan cancelled"
     }
 
-    private func finishScan(_ scanID: UUID, result: [RecoveredFile]) {
+    func finishScan(_ scanID: UUID, result: [RecoveredFile]) {
         guard currentScanID == scanID else { return }
         if let pendingProgress { progress = pendingProgress }
         discardPendingUpdates()
@@ -102,7 +111,7 @@ import AppKit
         message = result.isEmpty ? "No file candidates found" : "Scan complete · \(result.count) potential file candidates"
     }
 
-    private func failScan(_ scanID: UUID, error: Error) {
+    func failScan(_ scanID: UUID, error: Error) {
         guard currentScanID == scanID else { return }
         discardPendingUpdates()
         scanning = false
@@ -130,11 +139,8 @@ import AppKit
         pendingProgress = nil
     }
 
-    private func receive(progress update: ScanProgress, scanID: UUID) {
-        let baseline = pendingProgress ?? progress
-        guard currentScanID == scanID,
-              update.bytesRead >= baseline.bytesRead,
-              update.found >= baseline.found else { return }
+    func receive(progress update: ScanProgress, scanID: UUID) {
+        guard currentScanID == scanID, Self.canReplace(pendingProgress ?? progress, with: update) else { return }
         pendingProgress = update
         guard progressFlushTask == nil else { return }
         progressFlushTask = Task { [weak self] in
@@ -149,7 +155,13 @@ import AppKit
         }
     }
 
-    private func receive(candidate: RecoveredFile, scanID: UUID) {
+    /// Parallel workers report progress out of order, so an older snapshot
+    /// must never move the display backwards.
+    nonisolated static func canReplace(_ current: ScanProgress, with update: ScanProgress) -> Bool {
+        update.bytesRead >= current.bytesRead && update.found >= current.found
+    }
+
+    func receive(candidate: RecoveredFile, scanID: UUID) {
         guard currentScanID == scanID else { return }
         pendingCandidates.append(candidate)
         guard candidateFlushTask == nil else { return }
@@ -247,7 +259,7 @@ import AppKit
 
     /// Writes each file into a per-kind folder, never replacing an existing
     /// file. Returns a description of each failure.
-    private nonisolated static func write(_ files: [RecoveredFile], to folder: URL) -> [String] {
+    nonisolated static func write(_ files: [RecoveredFile], to folder: URL) -> [String] {
         var failures: [String] = []
         for file in files {
             do {
@@ -264,7 +276,7 @@ import AppKit
     }
 
     /// `name.ext`, or `name (n).ext` for the first `n` that is not taken.
-    private nonisolated static func availableDestination(in directory: URL, name: String, fileExtension: String) -> URL {
+    nonisolated static func availableDestination(in directory: URL, name: String, fileExtension: String) -> URL {
         func candidate(_ stem: String) -> URL {
             let base = directory.appendingPathComponent(stem)
             return fileExtension.isEmpty ? base : base.appendingPathExtension(fileExtension)
@@ -297,8 +309,12 @@ import AppKit
 
     private func isOnSelectedSourceVolume(_ folder: URL) -> Bool {
         guard let selected else { return false }
+        return Self.isFolder(folder, onVolumeMountedAt: selected.mountPath)
+    }
+
+    nonisolated static func isFolder(_ folder: URL, onVolumeMountedAt mountPath: String) -> Bool {
         let destinationPath = folder.standardizedFileURL.resolvingSymlinksInPath().path
-        let sourcePath = URL(fileURLWithPath: selected.mountPath).standardizedFileURL.resolvingSymlinksInPath().path
+        let sourcePath = URL(fileURLWithPath: mountPath).standardizedFileURL.resolvingSymlinksInPath().path
         let sourcePrefix = sourcePath.hasSuffix("/") ? sourcePath : sourcePath + "/"
         return destinationPath == sourcePath || destinationPath.hasPrefix(sourcePrefix)
     }

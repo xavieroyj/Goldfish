@@ -29,6 +29,7 @@ struct ContentView: View {
                         Rectangle().fill(Color.border).frame(width: 1)
                         previewPanel.frame(width: 352)
                     }
+                    .frame(maxHeight: .infinity)
                 }
             }
             if model.permissionHelp {
@@ -552,6 +553,10 @@ struct ContentView: View {
             .padding(.horizontal, 18).frame(height: paneHeaderHeight)
             .overlay(alignment: .bottom) { Rectangle().fill(Color.border).frame(height: 1) }
             if let file = focusedFile {
+                // Metadata varies per file; scroll it so a long EXIF list cannot
+                // grow the panel past the window and push the header and export
+                // controls off screen.
+                ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Group {
                         if file.kind == .image || file.kind == .raw {
@@ -583,13 +588,13 @@ struct ContentView: View {
                         ForEach(file.metadata.keys.sorted(), id: \.self) { key in metadataRow(key, file.metadata[key] ?? "") }
                     }
                     .padding(.top, 14)
-                    Spacer(minLength: 10)
                     if !model.diagnostic.isEmpty {
-                        Text(model.diagnostic).font(.system(size: 8)).foregroundStyle(Color.coral).lineLimit(3).padding(.bottom, 8)
+                        Text(model.diagnostic).font(.system(size: 8)).foregroundStyle(Color.coral).lineLimit(3).padding(.top, 10)
                     }
                 }
                 .padding(18)
-                Spacer(minLength: 0)
+                }
+                .frame(maxHeight: .infinity)
                 Rectangle().fill(Color.border).frame(height: 1)
                 Button { model.chooseExportDestination() } label: {
                     HStack(spacing: 10) {

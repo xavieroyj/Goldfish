@@ -92,6 +92,8 @@ actor ScanProgressReporter {
         self.total = total
     }
 
+    var hasReadErrors: Bool { !readErrors.isEmpty }
+
     func addBytes(_ bytes: UInt64, at offset: UInt64) -> ScanProgress {
         bytesRead = min(total, bytesRead + bytes)
         insert(ScannedRange(start: offset, end: offset + bytes), into: &scannedRanges)

@@ -1,0 +1,58 @@
+name: Release
+
+# Push a version tag to publish a release:
+#   git tag v0.2.0 && git push origin v0.2.0
+# Tags with a suffix (e.g. v0.2.0-beta.1) are published as pre-releases.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build universal app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          UNIVERSAL=1 VERSION="$VERSION" Scripts/build-app.sh
+
+      - name: Verify bundle
+        run: |
+          codesign --verify --deep --strict build/Goldfish.app
+          lipo -archs build/Goldfish.app/Contents/MacOS/Goldfish
+          plutil -extract CFBundleShortVersionString raw build/Goldfish.app/Contents/Info.plist
+
+      - name: Package
+        run: |
+          ZIP="Goldfish-${VERSION}-macOS.zip"
+          ditto -c -k --keepParent build/Goldfish.app "$ZIP"
+          shasum -a 256 "$ZIP" > "$ZIP.sha256"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRERELEASE=(--prerelease); fi
+          NOTES="Download **$ZIP**, unzip it and move Goldfish to Applications. \
+          This build is not notarized by Apple, so macOS blocks the first launch. \
+          See [Installing Goldfish](https://github.com/$GITHUB_REPOSITORY#installing-goldfish) for how to open it."
+          gh release create "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" \
+            --title "Goldfish $VERSION" \
+            --notes "$NOTES" \
+            --generate-notes \
+            "${PRERELEASE[@]}"

@@ -16,6 +16,57 @@
 
 ---
 
+## Installing Goldfish
+
+1. Download the latest `Goldfish-<version>-macOS.zip` from the [Releases](../../releases/latest) page.
+2. Double-click the zip to unpack it, then drag **Goldfish** into your **Applications** folder.
+3. Open it once using the steps below. After that, it opens normally like any other app.
+
+The download works on both Apple silicon and Intel Macs running macOS 14 Sonoma or later.
+
+### Why macOS blocks Goldfish the first time
+
+Apple only lets an app open straight away if the developer has paid for an Apple Developer account and sent each version to Apple for an automated check, called *notarization*. Goldfish is a free, open-source project and isn't notarized. So the first time you open it, macOS shows a warning such as **"Goldfish" Not Opened** or **Apple could not verify "Goldfish" is free of malware**.
+
+The warning means Apple hasn't checked this app. It doesn't mean anything wrong was found. Goldfish only reads your card, never connects to the internet, and all of its source code is in this repository for anyone to inspect. You can also [build it yourself](#build-and-run) instead of downloading it.
+
+### Opening it the first time
+
+**macOS 15 Sequoia and later**
+
+1. Double-click **Goldfish** in Applications. When the warning appears, click **Done** (don't click **Move to Trash**).
+2. Open **System Settings → Privacy & Security** and scroll down to the **Security** section.
+3. You'll see *"Goldfish" was blocked to protect your Mac.* Click **Open Anyway**.
+4. Enter your Mac password if asked, then click **Open Anyway** in the confirmation.
+
+**macOS 14 Sonoma**
+
+1. In Applications, **right-click** (or Control-click) **Goldfish** and choose **Open**.
+2. Click **Open** in the warning.
+
+**Using Terminal instead**
+
+If you're comfortable with Terminal, this command removes the "downloaded from the internet" mark that triggers the warning:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Goldfish.app
+```
+
+You only need to do this once per version. After you install an update, macOS will ask again.
+
+<details>
+<summary>Checking your download (optional)</summary>
+
+Each release includes a `.sha256` file. To confirm your download matches the one GitHub built, run this in the folder you downloaded to and compare the result with the contents of the `.sha256` file:
+
+```sh
+shasum -a 256 Goldfish-*-macOS.zip
+```
+
+</details>
+
+---
+
 ## What is Goldfish?
 
 When you delete a photo from a camera's memory card, or format the card, the picture usually isn't gone right away. The card only forgets *where* the photo was. The photo itself stays on the card until something new is saved over it.
@@ -185,7 +236,20 @@ Scripts/run-debug.sh          # debug run, console output also saved to goldfish
 Scripts/build-app.sh          # release build, packaged as build/Goldfish.app
 ```
 
-The app bundle is signed ad hoc, so on another Mac Gatekeeper will block it the first time. Open it from **System Settings → Privacy & Security → Open Anyway**.
+`Scripts/build-app.sh` also accepts `UNIVERSAL=1` (build for both arm64 and x86_64) and `VERSION=1.2.3` (stamp the version into the bundle's `Info.plist`).
+
+The app bundle is signed ad hoc, so on another Mac Gatekeeper will block it the first time (see [Installing Goldfish](#installing-goldfish)).
+
+### Publishing a release
+
+Pushing a version tag runs `.github/workflows/release.yml`. It runs the tests, builds a universal app stamped with the tag's version, and publishes a GitHub release with the zip and its SHA-256 checksum attached:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+A tag with a suffix, such as `v0.2.0-beta.1`, is published as a pre-release.
 
 App metadata and the icon live in `Packaging/`. The supplied icon artwork is in `AppIcons/`, and `Scripts/prepare-app-icon.swift` regenerates the `.icns`. See `AGENTS.md` for the icon sizing rules.
 

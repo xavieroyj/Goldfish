@@ -92,8 +92,9 @@ final class RawDevice: @unchecked Sendable {
         var data = Data(count: count)
         let result = data.withUnsafeMutableBytes { pread(descriptor, $0.baseAddress, count, off_t(offset)) }
         guard result >= 0 else {
+            // Not logged here: the sector-by-sector retry of a bad block would
+            // log every sector. Callers log what failed.
             let code = errno
-            GoldfishLog.write("Raw read failed: path=\(path), offset=\(offset), count=\(count), errno=\(code)")
             // A bad sector and a removed card both report EIO, but macOS revokes
             // the descriptor of a removed device, so fstat on it then fails.
             var info = stat()

@@ -240,6 +240,8 @@ public actor RecoveryEngine {
                     found.append(file)
                     if let thumbnailOffset = file.embeddedThumbnailOffset { embeddedJPEGOffsets.insert(thumbnailOffset) }
                     await onCandidate(file)
+                } catch is CancellationError {
+                    // The scan was stopped; not a carve failure.
                 } catch {
                     GoldfishLog.write("Candidate carve failed at offset \(start): \(error.localizedDescription)")
                 }
@@ -297,6 +299,16 @@ public actor RecoveryEngine {
     private nonisolated static func rescanInSmallBlocks(device: RawDevice, from start: UInt64, to end: UInt64, onReadError: (ScannedRange) async -> Void, onBlock: (Data, UInt64) async -> Void) async throws {
         // Split no finer than one device block, and never below 512 bytes.
         let sectorSize = Int(max(512, device.blockSize))
+        // A bad block can fail sector by sector, so failures are logged once per block.
+        var unreadableBytes = 0
+        var unreadableRuns = 0
+        var lastUnreadableEnd: UInt64?
+        var lastError: RecoveryError?
+        defer {
+            if let lastError {
+                GoldfishLog.write("Skipped \(unreadableBytes) unreadable byte(s) in \(unreadableRuns) run(s) between offsets \(start) and \(end): \(lastError.localizedDescription)")
+            }
+        }
         var retryOffset = start
         while retryOffset < end {
             try Task.checkCancellation()
@@ -316,7 +328,10 @@ public actor RecoveryEngine {
                         continue
                     }
                     await onReadError(ScannedRange(start: partOffset, end: partOffset + UInt64(partCount)))
-                    GoldfishLog.write("Read error at offset \(partOffset), length \(partCount): \(error.localizedDescription)")
+                    if lastUnreadableEnd != partOffset { unreadableRuns += 1 }
+                    lastUnreadableEnd = partOffset + UInt64(partCount)
+                    unreadableBytes += partCount
+                    lastError = error
                 }
             }
             retryOffset += UInt64(retryCount)
